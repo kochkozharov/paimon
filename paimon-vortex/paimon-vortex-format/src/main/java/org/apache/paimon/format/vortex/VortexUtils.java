@@ -86,7 +86,22 @@ public class VortexUtils {
 
         Path converted = path;
         Map<String, String> storageOptions = new HashMap<>();
-        if ("oss".equals(schema)) {
+        if ("s3a".equals(schema)) {
+            String endpoint = System.getenv("AWS_ENDPOINT");
+            String accessKey = System.getenv("AWS_ACCESS_KEY_ID");
+            String secretKey = System.getenv("AWS_SECRET_ACCESS_KEY");
+            if (endpoint != null) {
+                storageOptions.put("endpoint", endpoint);
+            }
+            if (accessKey != null) {
+                storageOptions.put("access_key_id", accessKey);
+            }
+            if (secretKey != null) {
+                storageOptions.put("secret_access_key", secretKey);
+            }
+            storageOptions.put("virtual_hosted_style_request", "false");
+            converted = new Path(uri.toString().replace("s3a://", "s3://"));
+        } else if ("oss".equals(schema)) {
             storageOptions.put(
                     "endpoint",
                     "https://" + uri.getHost() + "." + originOptions.get("fs.oss.endpoint"));
