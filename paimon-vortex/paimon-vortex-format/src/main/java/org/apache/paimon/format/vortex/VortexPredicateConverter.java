@@ -38,6 +38,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.TimestampType;
 
@@ -76,11 +77,18 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
         FieldRef fieldRef = fieldRefOpt.get();
         Expression field = GetItem.of(Root.INSTANCE, fieldRef.name());
 
+        // IsNull/IsNotNull сравнивают колонку с NULL. Vortex-expression
+        // строго типизован — если слева `utf8?`, а справа untyped `null`,
+        // native-сторона panic-ует с "Cannot compare different DTypes …/null"
+        // и аборчит JVM. Строим ТИПИЗОВАННЫЙ null по типу поля; если тип
+        // не поддержан (typedNull == null), скипаем pushdown — Flink
+        // отфильтрует на своей стороне.
+        Literal<?> typedNull = typedNullLit(fieldRef.type());
         if (predicate.function() instanceof IsNull) {
-            return Not.of(Binary.notEq(field, Literal.nullLit()));
+            return typedNull == null ? null : Not.of(Binary.notEq(field, typedNull));
         }
         if (predicate.function() instanceof IsNotNull) {
-            return Binary.notEq(field, Literal.nullLit());
+            return typedNull == null ? null : Binary.notEq(field, typedNull);
         }
 
         List<Object> literals = predicate.literals();
@@ -148,10 +156,72 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
         return null;
     }
 
+    /**
+     * Создаёт ТИПИЗОВАННЫЙ null-литерал по paimon-типу. Vortex-expression
+     * требует совпадения DType в обеих сторонах бинарной операции — untyped
+     * {@code Literal.nullLit()} сравнивать с {@code utf8?}/{@code i64?} и
+     * прочими нельзя (native panic, non-unwinding → краш TM).
+     *
+     * <p>Типы покрывают ВСЁ что умеет {@link #toLiteral}, плюс BINARY/VARBINARY.
+     * Для неподдерживаемых типов (TIME_*, композитные ARRAY/MAP/ROW) возвращает
+     * {@code null} — caller должен скипнуть pushdown.
+     */
+    @Nullable
+    private static Literal<?> typedNullLit(DataType type) {
+        switch (type.getTypeRoot()) {
+            case BOOLEAN:
+                return Literal.bool(null);
+            case TINYINT:
+                return Literal.int8(null);
+            case SMALLINT:
+                return Literal.int16(null);
+            case INTEGER:
+            case DATE:
+                return Literal.int32(null);
+            case BIGINT:
+                return Literal.int64(null);
+            case FLOAT:
+                return Literal.float32(null);
+            case DOUBLE:
+                return Literal.float64(null);
+            case CHAR:
+            case VARCHAR:
+                return Literal.string(null);
+            case BINARY:
+            case VARBINARY:
+                return Literal.bytes(null);
+            case DECIMAL:
+                DecimalType dt = (DecimalType) type;
+                return Literal.decimal(null, dt.getPrecision(), dt.getScale());
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                return typedNullTimestamp(
+                        ((TimestampType) type).getPrecision(), Optional.empty());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return typedNullTimestamp(
+                        ((LocalZonedTimestampType) type).getPrecision(), Optional.of("UTC"));
+            default:
+                // TIME_*, ARRAY, MAP, ROW, MULTISET — toLiteral их тоже не
+                // поддерживает. Skip pushdown для таких.
+                return null;
+        }
+    }
+
+    private static Literal<Long> typedNullTimestamp(int precision, Optional<String> timeZone) {
+        if (precision <= 3) {
+            return Literal.timestampMillis(null, timeZone);
+        } else if (precision <= 6) {
+            return Literal.timestampMicros(null, timeZone);
+        } else {
+            return Literal.timestampNanos(null, timeZone);
+        }
+    }
+
     @Nullable
     private static Literal<?> toLiteral(DataType type, Object value) {
         if (value == null) {
-            return Literal.nullLit();
+            // Типизованный null; если тип не поддержан — вернём null и caller
+            // отбросит pushdown этого предиката.
+            return typedNullLit(type);
         }
         switch (type.getTypeRoot()) {
             case BOOLEAN:
