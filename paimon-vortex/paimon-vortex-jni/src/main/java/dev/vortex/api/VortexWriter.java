@@ -40,8 +40,6 @@ public interface VortexWriter extends AutoCloseable {
 
     void writeBatch(byte[] arrowData) throws IOException;
 
-    void writeBatchFfi(long arrowArrayAddr, long arrowSchemaAddr) throws IOException;
-
     @Override
     void close() throws IOException;
 }
