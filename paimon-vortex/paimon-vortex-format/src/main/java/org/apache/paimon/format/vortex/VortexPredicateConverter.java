@@ -157,14 +157,13 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
     }
 
     /**
-     * Создаёт ТИПИЗОВАННЫЙ null-литерал по paimon-типу. Vortex-expression
-     * требует совпадения DType в обеих сторонах бинарной операции — untyped
-     * {@code Literal.nullLit()} сравнивать с {@code utf8?}/{@code i64?} и
-     * прочими нельзя (native panic, non-unwinding → краш TM).
+     * Создаёт ТИПИЗОВАННЫЙ null-литерал по paimon-типу. Vortex-expression требует совпадения DType
+     * в обеих сторонах бинарной операции — untyped {@code Literal.nullLit()} сравнивать с {@code
+     * utf8?}/{@code i64?} и прочими нельзя (native panic, non-unwinding → краш TM).
      *
-     * <p>Типы покрывают ВСЁ что умеет {@link #toLiteral}, плюс BINARY/VARBINARY.
-     * Для неподдерживаемых типов (TIME_*, композитные ARRAY/MAP/ROW) возвращает
-     * {@code null} — caller должен скипнуть pushdown.
+     * <p>Типы покрывают ВСЁ что умеет {@link #toLiteral}, плюс BINARY/VARBINARY. Для
+     * неподдерживаемых типов (TIME_*, композитные ARRAY/MAP/ROW) возвращает {@code null} — caller
+     * должен скипнуть pushdown.
      */
     @Nullable
     private static Literal<?> typedNullLit(DataType type) {
@@ -194,8 +193,7 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
                 DecimalType dt = (DecimalType) type;
                 return Literal.decimal(null, dt.getPrecision(), dt.getScale());
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-                return typedNullTimestamp(
-                        ((TimestampType) type).getPrecision(), Optional.empty());
+                return typedNullTimestamp(((TimestampType) type).getPrecision(), Optional.empty());
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return typedNullTimestamp(
                         ((LocalZonedTimestampType) type).getPrecision(), Optional.of("UTC"));
