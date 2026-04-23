@@ -175,8 +175,14 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             case SMALLINT:
                 return Literal.int16(null);
             case INTEGER:
-            case DATE:
                 return Literal.int32(null);
+            case DATE:
+                // DATE в vortex — extension-тип "vortex.date" поверх int32 (days-since-epoch).
+                // raw Literal.int32() создаёт primitive, что ломает vortex-compare:
+                // `rhs.as_extension()` в datetime-parts/src/compute/compare.rs panic-ует
+                // "Failed to convert scalar to extension" и абортит TM (non-unwinding).
+                // Literal.dateDays() создаёт extension-scalar с правильными metadata.
+                return Literal.dateDays(null);
             case BIGINT:
                 return Literal.int64(null);
             case FLOAT:
@@ -229,8 +235,11 @@ public class VortexPredicateConverter implements PredicateVisitor<Expression> {
             case SMALLINT:
                 return Literal.int16((Short) value);
             case INTEGER:
-            case DATE:
                 return Literal.int32((Integer) value);
+            case DATE:
+                // См. typedNullLit/DATE: обязательно extension-scalar, иначе
+                // vortex native panic при compare против extension-колонки.
+                return Literal.dateDays((Integer) value);
             case BIGINT:
                 return Literal.int64((Long) value);
             case FLOAT:
